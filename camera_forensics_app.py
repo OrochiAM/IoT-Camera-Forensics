@@ -1,15 +1,21 @@
+import matplotlib
+matplotlib.use("TkAgg")
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
+
 import pandas as pd
 import numpy as np
+
 from datetime import datetime
 import os
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from collections import Counter
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import seaborn as sns
+
 
 class NetworkForensicApp:
     def __init__(self, root):
@@ -25,6 +31,7 @@ class NetworkForensicApp:
             'success': '#a6e3a1',
             'warning': '#f9e2af',
             'danger': '#f38ba8',
+            'camera': '#ff6b9d',
             'card': '#313244',
             'hover': '#45475a'
         }
@@ -67,6 +74,7 @@ class NetworkForensicApp:
         self.df = None
         self.model = None
         self.scaler = StandardScaler()
+        self.camera_stats = None
         
         self.setup_ui()
         
@@ -115,7 +123,7 @@ class NetworkForensicApp:
         title_label.pack(side=tk.LEFT)
         
         subtitle = tk.Label(header_frame,
-                        text="AI Analiza Kamere",
+                        text="AI-Powered Camera & Network Forensic Analysis",
                         bg=self.colors['bg'],
                         fg=self.colors['fg'],
                         font=('Segoe UI', 11))
@@ -168,7 +176,7 @@ class NetworkForensicApp:
         status_icon.pack(side=tk.LEFT, padx=(0, 10))
         
         self.status_label = tk.Label(status_inner,
-                                    text="Ready to analyze network traffic",
+                                    text="Ready to analyze network traffic and detect cameras",
                                     bg=self.colors['card'],
                                     fg=self.colors['fg'],
                                     font=('Segoe UI', 11))
@@ -208,7 +216,7 @@ class NetworkForensicApp:
         viz_card.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
         viz_header = tk.Label(viz_card,
-                            text="📊 Attack Distribution",
+                            text="📊 Camera Traffic Analysis",
                             bg=self.colors['card'],
                             fg=self.colors['accent'],
                             font=('Segoe UI', 13, 'bold'))
@@ -280,8 +288,117 @@ class NetworkForensicApp:
                 
         except Exception as e:
             messagebox.showerror("Error", f"Training failed:\n{str(e)}")
+    
+    def detect_camera_traffic(self):
+        try:
+            camera_score = pd.Series(0, index=self.df.index)
             
+            # Pattern 1: High constant rate (video streaming) - Weight: 2
+            if 'Rate' in self.df.columns:
+                rate_mean = self.df['Rate'].mean()
+                rate_std = self.df['Rate'].std()
+                if rate_std > 0:
+                    high_rate = self.df['Rate'] > (rate_mean + 0.5 * rate_std)
+                    camera_score = camera_score + high_rate.astype(int) * 2
+            
+            # Pattern 2: Large packet sizes (video data) - Weight: 2
+            if 'Tot size' in self.df.columns:
+                large_packets = self.df['Tot size'] > self.df['Tot size'].quantile(0.75)
+                camera_score = camera_score + large_packets.astype(int) * 2
+            
+            # Pattern 3: Low IAT - continuous streaming - Weight: 2
+            if 'IAT' in self.df.columns:
+                low_iat = self.df['IAT'] < self.df['IAT'].quantile(0.3)
+                camera_score = camera_score + low_iat.astype(int) * 2
+            
+            # Pattern 4: UDP heavy traffic (RTSP streaming) - Weight: 3
+            if 'UDP' in self.df.columns:
+                udp_heavy = self.df['UDP'] > 0.6
+                camera_score = camera_score + udp_heavy.astype(int) * 3
+            
+            # Pattern 5: HTTP/HTTPS for web interface - Weight: 1
+            if 'HTTP' in self.df.columns and 'HTTPS' in self.df.columns:
+                web_interface = (self.df['HTTP'] > 0) | (self.df['HTTPS'] > 0)
+                camera_score = camera_score + web_interface.astype(int) * 1
+            
+            # Pattern 6: Consistent flow duration - Weight: 1
+            if 'Duration' in self.df.columns:
+                long_duration = self.df['Duration'] > self.df['Duration'].quantile(0.6)
+                camera_score = camera_score + long_duration.astype(int) * 1
+            
+            # Pattern 7: Low variance in packet timing (steady stream) - Weight: 2
+            if 'Std' in self.df.columns:
+                low_variance = self.df['Std'] < self.df['Std'].quantile(0.4)
+                camera_score = camera_score + low_variance.astype(int) * 2
+            
+            # Pattern 8: High average packet size - Weight: 1
+            if 'AVG' in self.df.columns:
+                high_avg = self.df['AVG'] > self.df['AVG'].quantile(0.7)
+                camera_score = camera_score + high_avg.astype(int) * 1
+            
+            # Classify as camera if score >= 6 (out of max 14)
+            self.df['is_camera_traffic'] = camera_score >= 6
+            self.df['camera_confidence_score'] = camera_score
+            
+            camera_count = int(self.df['is_camera_traffic'].sum())
+            camera_percentage = (camera_count / len(self.df)) * 100 if len(self.df) > 0 else 0
+            
+            # Calculate camera statistics
+            if camera_count > 0:
+                avg_confidence = float(self.df[self.df['is_camera_traffic']]['camera_confidence_score'].mean())
+            else:
+                avg_confidence = 0
+                
+            self.camera_stats = {
+                'total_flows': camera_count,
+                'percentage': camera_percentage,
+                'avg_confidence': avg_confidence
+            }
+            
+            # Add camera detection results to output
+            self.results_text.insert(tk.END, f"\n{'='*60}\n")
+            self.results_text.insert(tk.END, "🎥 CAMERA TRAFFIC DETECTION\n")
+            self.results_text.insert(tk.END, f"{'='*60}\n\n")
+            self.results_text.insert(tk.END, f"Detected camera traffic: {camera_count:,} flows ({camera_percentage:.2f}%)\n")
+            
+            if camera_count > 0:
+                self.results_text.insert(tk.END, f"Average confidence score: {avg_confidence:.1f}/14\n\n")
+                
+                # Protocol distribution for camera traffic
+                if 'UDP' in self.df.columns:
+                    camera_udp = float(self.df[self.df['is_camera_traffic']]['UDP'].mean())
+                    self.results_text.insert(tk.END, f"UDP usage: {camera_udp*100:.1f}%\n")
+                
+                if 'Rate' in self.df.columns:
+                    avg_rate = float(self.df[self.df['is_camera_traffic']]['Rate'].mean())
+                    self.results_text.insert(tk.END, f"Average data rate: {avg_rate:.2f}\n")
+                
+                if 'Tot size' in self.df.columns:
+                    avg_size = float(self.df[self.df['is_camera_traffic']]['Tot size'].mean())
+                    self.results_text.insert(tk.END, f"Average packet size: {avg_size:.2f}\n")
+                
+                # Check correlation with attacks
+                if 'predicted_attack' in self.df.columns:
+                    camera_attacks = self.df[self.df['is_camera_traffic']]['predicted_attack'].value_counts()
+                    self.results_text.insert(tk.END, f"\nAttacks on camera traffic:\n")
+                    for attack, count in camera_attacks.items():
+                        attack_pct = (count / camera_count) * 100
+                        self.results_text.insert(tk.END, f"  {attack}: {count:,} ({attack_pct:.1f}%)\n")
+                    
+                    if 'Mirai' in camera_attacks.index:
+                        mirai_on_cameras = int(camera_attacks['Mirai'])
+                        self.results_text.insert(tk.END, 
+                            f"\n⚠️  ALERT: {mirai_on_cameras:,} Mirai attacks on cameras!\n")
+            else:
+                self.results_text.insert(tk.END, "No camera traffic patterns detected.\n")
+            
+            self.results_text.insert(tk.END, f"\n{'='*60}\n\n")
+            
+        except Exception as e:
+            self.results_text.insert(tk.END, f"⚠️  Camera detection error: {str(e)}\n\n")
+
     def analyze_traffic(self):
+        
         if self.df is None:
             messagebox.showwarning("Warning", "Please load a CSV file first!")
             return
@@ -298,55 +415,74 @@ class NetworkForensicApp:
             predictions = self.model.predict(X_scaled)
             self.df['predicted_attack'] = predictions
             
-            attack_counts = Counter(predictions)
+            # Detect camera traffic
+            self.detect_camera_traffic()
             
-            self.results_text.insert(tk.END, f"\n{'='*60}\n")
-            self.results_text.insert(tk.END, "🔍 NETWORK TRAFFIC ANALYSIS\n")
-            self.results_text.insert(tk.END, f"{'='*60}\n\n")
-            
-            for attack_type, count in attack_counts.most_common():
-                percentage = (count / len(predictions)) * 100
-                bar = '█' * int(percentage / 2)
-                self.results_text.insert(tk.END, 
-                    f"{attack_type:12s} │{bar:50s}│ {count:6,d} ({percentage:5.2f}%)\n")
-            
-            self.results_text.insert(tk.END, f"{'='*60}\n\n")
-            
-            # Visualization
+            # Visualization - Camera traffic breakdown
             self.ax.clear()
-            sorted_data = sorted(zip(attack_counts.keys(), attack_counts.values()), 
-                            key=lambda x: x[1], reverse=True)
-            attack_types = [x[0] for x in sorted_data]
-            counts = [x[1] for x in sorted_data]
             
-            colors = ['#f38ba8', '#fab387', '#f9e2af', '#a6e3a1', 
-                    '#94e2d5', '#89b4fa', '#cba6f7'][:len(attack_types)]
-            
-            bars = self.ax.barh(attack_types, counts, color=colors, 
-                            edgecolor='white', linewidth=1.5)
-            
-            for bar, count in zip(bars, counts):
-                width = bar.get_width()
-                percentage = (count / len(predictions)) * 100
-                self.ax.text(width, bar.get_y() + bar.get_height()/2, 
-                        f'  {count:,} ({percentage:.1f}%)',
-                        ha='left', va='center', fontsize=10, 
-                        weight='bold', color='white')
-            
-            self.ax.set_xlabel('Detected Packets', fontsize=11, weight='bold', color='white')
-            self.ax.set_ylabel('Attack Type', fontsize=11, weight='bold', color='white')
-            self.ax.set_title('Attack Distribution Analysis', 
-                            fontsize=13, weight='bold', pad=20, color='white')
-            self.ax.grid(axis='x', alpha=0.2, linestyle='--', color='white')
-            self.ax.tick_params(colors='white')
+            if self.camera_stats and self.camera_stats['total_flows'] > 0:
+                # Show camera traffic vs attacks on cameras
+                camera_df = self.df[self.df['is_camera_traffic'] == True]
+                attack_on_cameras = camera_df['predicted_attack'].value_counts()
+                
+                categories = list(attack_on_cameras.keys())
+                counts = attack_on_cameras.tolist()
+                
+                # Color mapping
+                color_map = {
+                    'DDoS': '#f38ba8',
+                    'DoS': '#fab387',
+                    'Mirai': '#f9e2af',
+                    'Recon': '#a6e3a1',
+                    'Web': '#94e2d5',
+                    'Spoofing': '#89b4fa',
+                    'BruteForce': '#cba6f7',
+                    'Benign': '#b4befe'
+                }
+                
+                bar_colors = [color_map.get(cat, '#ff6b9d') for cat in categories]
+
+                bars = self.ax.barh(categories, counts, color=bar_colors,
+                    edgecolor='white', linewidth=1.5)
+
+                
+                for bar, count, category in zip(bars, counts, categories):
+                    width = bar.get_width()
+                    percentage = (count / self.camera_stats['total_flows']) * 100
+                    self.ax.text(width, bar.get_y() + bar.get_height()/2, 
+                            f'  {count:,} ({percentage:.1f}%)',
+                            ha='left', va='center', fontsize=10, 
+                            weight='bold', color='white')
+                
+                self.ax.set_xlabel('Number of Camera Flows', fontsize=11, weight='bold', color='white')
+                self.ax.set_ylabel('Traffic Type', fontsize=11, weight='bold', color='white')
+                self.ax.set_title(f'🎥 Camera Traffic Analysis ({self.camera_stats["total_flows"]:,} flows detected)', 
+                                fontsize=12, weight='bold', pad=20, color='white')
+                self.ax.grid(axis='x', alpha=0.2, linestyle='--', color='white')
+                self.ax.tick_params(colors='white')
+            else:
+                self.ax.text(0.5, 0.5, 'No Camera Traffic Detected', 
+                        ha='center', va='center', fontsize=14, color='white',
+                        transform=self.ax.transAxes)
+                self.ax.set_xlim(0, 1)
+                self.ax.set_ylim(0, 1)
+                self.ax.axis('off')
             
             self.fig.tight_layout()
             self.canvas.draw()
             
-            self.status_label.config(text=f"✓ Analyzed {len(predictions):,} network flows")
+            # Update status with camera info
+            if self.camera_stats and self.camera_stats['total_flows'] > 0:
+                self.status_label.config(
+                    text=f"✓ Analyzed {len(predictions):,} flows | 🎥 Detected {self.camera_stats['total_flows']:,} camera flows ({self.camera_stats['percentage']:.1f}%)"
+                )
+            else:
+                self.status_label.config(text=f"✓ Analyzed {len(predictions):,} flows | No camera traffic detected")
             
         except Exception as e:
             messagebox.showerror("Error", f"Analysis failed:\n{str(e)}")
+
             
     def generate_forensic_report(self):
         if self.df is None or 'predicted_attack' not in self.df.columns:
@@ -357,7 +493,7 @@ class NetworkForensicApp:
             report_path = filedialog.asksaveasfilename(
                 defaultextension=".txt",
                 filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-                initialfile=f"forensic_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                initialfile=f"camera_forensic_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
             )
             
             if not report_path:
@@ -365,71 +501,177 @@ class NetworkForensicApp:
                 
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write("=" * 80 + "\n")
-                f.write("       NETWORK FORENSIC ANALYSIS REPORT\n")
+                f.write("       CAMERA TRAFFIC FORENSIC ANALYSIS REPORT\n")
                 f.write("=" * 80 + "\n\n")
                 
                 f.write(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Total Packets Analyzed: {len(self.df):,}\n\n")
                 
-                f.write("-" * 80 + "\n")
-                f.write("ATTACK DETECTION STATISTICS\n")
-                f.write("-" * 80 + "\n\n")
-                
-                attack_counts = Counter(self.df['predicted_attack'])
-                for attack_type, count in attack_counts.most_common():
-                    percentage = (count / len(self.df)) * 100
-                    f.write(f"{attack_type:20s}: {count:8,d} packets ({percentage:6.2f}%)\n")
-                
-                f.write("\n" + "-" * 80 + "\n")
-                f.write("DETAILED ATTACK ANALYSIS\n")
-                f.write("-" * 80 + "\n\n")
-                
-                for attack_type in attack_counts.keys():
-                    if attack_type == 'Benign':
-                        continue
+                # Camera Detection Section
+                if 'is_camera_traffic' in self.df.columns:
+                    f.write("-" * 80 + "\n")
+                    f.write("CAMERA TRAFFIC DETECTION SUMMARY\n")
+                    f.write("-" * 80 + "\n\n")
+                    
+                    camera_count = self.df['is_camera_traffic'].sum()
+                    camera_percentage = (camera_count / len(self.df)) * 100
+                    non_camera_count = len(self.df) - camera_count
+                    
+                    f.write(f"Camera Traffic Flows: {camera_count:,} ({camera_percentage:.2f}%)\n")
+                    f.write(f"Non-Camera Traffic Flows: {non_camera_count:,} ({100-camera_percentage:.2f}%)\n\n")
+                    
+                    if camera_count > 0:
+                        avg_conf = self.df[self.df['is_camera_traffic']]['camera_confidence_score'].mean()
+                        f.write(f"Average Detection Confidence: {avg_conf:.1f}/14\n\n")
                         
-                    f.write(f"\n### {attack_type} ###\n")
-                    attack_df = self.df[self.df['predicted_attack'] == attack_type]
+                        f.write("Detection Methodology:\n")
+                        f.write("  • High constant data rate (video streaming pattern)\n")
+                        f.write("  • Large packet sizes (video data)\n")
+                        f.write("  • Low inter-arrival time (continuous stream)\n")
+                        f.write("  • UDP-heavy traffic (RTSP protocol)\n")
+                        f.write("  • HTTP/HTTPS presence (camera web interface)\n")
+                        f.write("  • Consistent flow duration\n")
+                        f.write("  • Low variance in timing (steady stream)\n")
+                        f.write("  • High average packet size\n\n")
+                        
+                        # Camera traffic characteristics
+                        camera_df = self.df[self.df['is_camera_traffic'] == True]
+                        
+                        f.write("-" * 80 + "\n")
+                        f.write("CAMERA TRAFFIC CHARACTERISTICS\n")
+                        f.write("-" * 80 + "\n\n")
+                        
+                        if 'Rate' in camera_df.columns:
+                            f.write(f"Average Data Rate: {camera_df['Rate'].mean():.2f}\n")
+                            f.write(f"Max Data Rate: {camera_df['Rate'].max():.2f}\n")
+                            f.write(f"Min Data Rate: {camera_df['Rate'].min():.2f}\n\n")
+                        
+                        if 'Tot size' in camera_df.columns:
+                            f.write(f"Average Packet Size: {camera_df['Tot size'].mean():.2f} bytes\n")
+                            f.write(f"Total Data Volume: {camera_df['Tot size'].sum():.2f} bytes\n\n")
+                        
+                        if 'UDP' in camera_df.columns:
+                            udp_pct = camera_df['UDP'].mean() * 100
+                            f.write(f"UDP Protocol Usage: {udp_pct:.1f}%\n\n")
+                        
+                        # Attacks on cameras
+                        if 'predicted_attack' in camera_df.columns:
+                            f.write("-" * 80 + "\n")
+                            f.write("ATTACKS DETECTED ON CAMERA TRAFFIC\n")
+                            f.write("-" * 80 + "\n\n")
+                            
+                            camera_attacks = camera_df['predicted_attack'].value_counts()
+                            for attack, count in camera_attacks.items():
+                                attack_pct = (count / camera_count) * 100
+                                f.write(f"{attack:20s}: {count:8,d} flows ({attack_pct:6.2f}%)\n")
+                            
+                            f.write("\n")
+                            
+                            # Detailed attack analysis for cameras
+                            f.write("-" * 80 + "\n")
+                            f.write("DETAILED ATTACK ANALYSIS ON CAMERAS\n")
+                            f.write("-" * 80 + "\n\n")
+                            
+                            for attack_type in camera_attacks.keys():
+                                if attack_type == 'Benign':
+                                    continue
+                                
+                                f.write(f"\n### {attack_type} on Camera Traffic ###\n")
+                                attack_camera_df = camera_df[camera_df['predicted_attack'] == attack_type]
+                                
+                                if 'Rate' in attack_camera_df.columns:
+                                    f.write(f"  Average Rate: {attack_camera_df['Rate'].mean():.2f}\n")
+                                
+                                if 'Duration' in attack_camera_df.columns:
+                                    f.write(f"  Average Duration: {attack_camera_df['Duration'].mean():.2f}\n")
+                                
+                                if 'Tot size' in attack_camera_df.columns:
+                                    f.write(f"  Average Packet Size: {attack_camera_df['Tot size'].mean():.2f}\n")
+                        
+                        f.write("\n" + "-" * 80 + "\n")
+                        f.write("CAMERA SECURITY RECOMMENDATIONS\n")
+                        f.write("-" * 80 + "\n\n")
+                        
+                        f.write("🎥 IMMEDIATE ACTIONS FOR CAMERA SECURITY:\n\n")
+                        f.write("1. NETWORK ISOLATION:\n")
+                        f.write("   - Place all cameras in separate VLAN\n")
+                        f.write("   - Implement strict firewall rules\n")
+                        f.write("   - Disable internet access for cameras if possible\n\n")
+                        
+                        f.write("2. ACCESS CONTROL:\n")
+                        f.write("   - Change ALL default passwords immediately\n")
+                        f.write("   - Use strong, unique passwords for each camera\n")
+                        f.write("   - Enable two-factor authentication where available\n")
+                        f.write("   - Implement MAC address filtering\n\n")
+                        
+                        f.write("3. FIRMWARE & UPDATES:\n")
+                        f.write("   - Update camera firmware to latest version\n")
+                        f.write("   - Enable automatic security updates\n")
+                        f.write("   - Regularly check manufacturer security bulletins\n\n")
+                        
+                        f.write("4. FEATURE HARDENING:\n")
+                        f.write("   - Disable UPnP on all cameras\n")
+                        f.write("   - Disable unused features and ports\n")
+                        f.write("   - Turn off cloud services if not needed\n")
+                        f.write("   - Disable P2P connections\n\n")
+                        
+                        f.write("5. REMOTE ACCESS:\n")
+                        f.write("   - Use VPN for all remote camera access\n")
+                        f.write("   - Never expose cameras directly to internet\n")
+                        f.write("   - Implement IP whitelisting\n\n")
+                        
+                        f.write("6. MONITORING:\n")
+                        f.write("   - Enable camera access logging\n")
+                        f.write("   - Monitor for unusual traffic patterns\n")
+                        f.write("   - Set up alerts for unauthorized access attempts\n")
+                        f.write("   - Regular security audits\n\n")
+                        
+                        # Mirai-specific recommendations
+                        if 'Mirai' in camera_attacks.index:
+                            mirai_count = camera_attacks['Mirai']
+                            f.write("⚠️  CRITICAL: MIRAI BOTNET ACTIVITY DETECTED\n\n")
+                            f.write(f"Mirai attacks on cameras: {mirai_count:,} flows\n\n")
+                            f.write("URGENT MIRAI MITIGATION STEPS:\n")
+                            f.write("   - Immediately isolate affected cameras\n")
+                            f.write("   - Factory reset all potentially compromised cameras\n")
+                            f.write("   - Scan entire network for botnet activity\n")
+                            f.write("   - Block common Mirai C&C server ports (23, 2323, 48101)\n")
+                            f.write("   - Monitor for scanning activity on ports 23, 2323\n")
+                            f.write("   - Consider replacing cameras with more secure models\n\n")
+                        
+                        f.write("-" * 80 + "\n")
+                        f.write("PRIORITY ACTION TIMELINE\n")
+                        f.write("-" * 80 + "\n\n")
+                        
+                        f.write("IMMEDIATE (Next 24 hours):\n")
+                        f.write("   ✓ Change all camera passwords\n")
+                        f.write("   ✓ Isolate camera network\n")
+                        f.write("   ✓ Disable UPnP and unused features\n")
+                        f.write("   ✓ Review access logs for suspicious activity\n\n")
+                        
+                        f.write("SHORT-TERM (Next week):\n")
+                        f.write("   ✓ Update all camera firmware\n")
+                        f.write("   ✓ Implement VLAN separation\n")
+                        f.write("   ✓ Configure VPN for remote access\n")
+                        f.write("   ✓ Enable logging and monitoring\n\n")
+                        
+                        f.write("LONG-TERM (Next month):\n")
+                        f.write("   ✓ Conduct full security audit\n")
+                        f.write("   ✓ Implement IDS/IPS for camera network\n")
+                        f.write("   ✓ Regular penetration testing\n")
+                        f.write("   ✓ Security awareness training for staff\n")
+                        f.write("   ✓ Review and update camera security policy\n\n")
                     
-                    if 'Protocol Type' in attack_df.columns:
-                        protocols = attack_df['Protocol Type'].value_counts()
-                        f.write(f"  Protocols: {dict(protocols)}\n")
-                    
-                    if 'Rate' in attack_df.columns:
-                        f.write(f"  Average Rate: {attack_df['Rate'].mean():.2f}\n")
-                    
-                    if 'Duration' in attack_df.columns:
-                        f.write(f"  Average Duration: {attack_df['Duration'].mean():.2f}\n")
-                    
-                f.write("\n" + "-" * 80 + "\n")
-                f.write("SECURITY RECOMMENDATIONS\n")
-                f.write("-" * 80 + "\n\n")
-                
-                if attack_counts.get('DDoS', 0) > 0:
-                    f.write("• DDoS ATTACK DETECTED\n")
-                    f.write("  - Implement rate limiting\n")
-                    f.write("  - Use DDoS protection services\n")
-                    f.write("  - Increase bandwidth capacity\n\n")
-                
-                if attack_counts.get('Recon', 0) > 0:
-                    f.write("• RECONNAISSANCE ACTIVITIES DETECTED\n")
-                    f.write("  - Enhance network activity monitoring\n")
-                    f.write("  - Block port scanning\n")
-                    f.write("  - Implement IDS/IPS systems\n\n")
-                
-                if attack_counts.get('Web', 0) > 0:
-                    f.write("• WEB ATTACKS DETECTED\n")
-                    f.write("  - Update web application firewalls\n")
-                    f.write("  - Use input validation\n")
-                    f.write("  - Implement WAF (Web Application Firewall)\n\n")
+                    else:
+                        f.write("No camera traffic detected in the analyzed data.\n\n")
                 
                 f.write("\n" + "=" * 80 + "\n")
                 f.write("END OF REPORT\n")
                 f.write("=" * 80 + "\n")
             
             self.results_text.insert(tk.END, 
-                f"✓ Forensic report saved: {os.path.basename(report_path)}\n\n")
-            messagebox.showinfo("Success", f"Report saved to:\n{report_path}")
+                f"✓ Camera forensic report saved: {os.path.basename(report_path)}\n\n")
+            messagebox.showinfo("Success", f"Camera forensic report saved to:\n{report_path}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Report generation failed:\n{str(e)}")
@@ -437,4 +679,6 @@ class NetworkForensicApp:
 if __name__ == "__main__":
     root = tk.Tk()
     app = NetworkForensicApp(root)
-    root.mainloop()
+    root.mainloop()    
+
+    
