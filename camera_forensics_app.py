@@ -457,7 +457,7 @@ class NetworkForensicApp:
                 
                 self.ax.set_xlabel('Number of Camera Flows', fontsize=11, weight='bold', color='white')
                 self.ax.set_ylabel('Traffic Type', fontsize=11, weight='bold', color='white')
-                self.ax.set_title(f'🎥 Camera Traffic Analysis ({self.camera_stats["total_flows"]:,} flows detected)', 
+                self.ax.set_title(f'Camera Traffic Analysis ({self.camera_stats["total_flows"]:,} flows detected)', 
                                 fontsize=12, weight='bold', pad=20, color='white')
                 self.ax.grid(axis='x', alpha=0.2, linestyle='--', color='white')
                 self.ax.tick_params(colors='white')
@@ -680,5 +680,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = NetworkForensicApp(root)
     root.mainloop()    
-
-    
